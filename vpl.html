@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>VPL Auction — Integrated</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;background:#131313;margin:0;padding:20px}
+    .nav{display:flex;gap:10px;margin-bottom:20px}
+    button{cursor:pointer;padding:8px 12px;border-radius:6px;border:0;background:#468eec;color:white}
+    .section{display:none;background:#e1dddd;padding:18px;border-radius:10px;box-shadow:0 4px 14px rgba(0,0,0,0.06);margin-bottom:16px}
+    .section.active{display:block}
+    input,select{width:100%;padding:8px;margin:8px 0;border:1px solid #1696ff;border-radius:6px}
+    .team-box{background:#c6cabd;padding:12px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.06);margin-bottom:12px}
+    .team-header{display:flex;justify-content:space-between;align-items:center}
+    .alert-low{background:#0413033e}
+    .alert-critical{background:#fff0f0}
+    .players-list{background:#fafafa;padding:8px;border-radius:6px;margin-top:10px}
+    .muted{color:#666;font-size:13px}
+  </style>
+</head>
+<body>
+
+<div class="nav">
+  <button id="navForm">Player Form</button>
+  <button id="navAdmin">Admin Panel</button>
+  <button id="navAuction">Auction (Admin)</button>
+</div>
+
+<!-- Player Form -->
+<section id="formSection" class="section active">
+  <h2>Player Registration</h2>
+  <input id="pname" placeholder="Player Name" />
+  <input id="page" type="number" placeholder="Age" />
+ <select id="prole">
+    <option value="Batsman">Batsman</option>
+    <option value="Bowler">Bowler</option>
+    <option value="wicket keeper">wicket keeper</option>
+    <option value="All-rounder">All-rounder</option>
+  </select>
+  <input id="pphoto" type="file" accept="image/*" />
+  <input id="pmobile" type="number" placeholder="Mobile Number" />
+  <button id="savePlayerBtn">Save Player</button>
+  <p class="muted">Saved players will appear in Admin and will be available in Auction.</p>
+</section>
+
+<!-- Admin Panel -->
+<section id="adminSection" class="section">
+  <h2>Admin Panel — Registered Players & Teams</h2>
+  <div style="display:flex;gap:12px;align-items:flex-start">
+    <div style="flex:1">
+      <h3>Players</h3>
+      <div id="playersList" class="players-list">No players yet</div>
+    </div>
+    <div style="width:320px">
+      <h3>Teams</h3>
+      <input id="newTeam" placeholder="New team name" />
+      <button id="addTeamBtn">Add Team</button>
+      <!-- Raptor toggle: enable preview for all clients -->
+      <div style="margin-top:12px">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input id="enableRaptor" type="checkbox" />
+          <span>Enable Raptor mini (Preview) for all clients</span>
+        </label>
+      </div>
+      <div id="teamsList" class="players-list" style="margin-top:12px">No teams yet</div>
+    </div>
+  </div>
+</section>
+
+<!-- Auction Panel (admin-only, gated when user opens it) -->
+<section id="auctionSection" class="section">
+  <h2>Auction Panel (Admin Only)</h2>
+  <p class="muted">Choose a player from the registered list, select a team and enter the bid price to buy.</p>
+
+  <label>Select Player</label>
+  <select id="auctionPlayerSelect"></select>
+
+  <label>Choose Team</label>
+  <select id="auctionTeamSelect"></select>
+
+  <label>Bid Price</label>
+  <input id="auctionPrice" type="number" placeholder="Enter price" />
+  <button id="auctionBuyBtn">Buy Player (Deduct points)</button>
+
+  <h3 style="margin-top:18px">Teams & Balances</h3>
+  <div id="auctionTeamsContainer"></div>
+
+  <h3 style="margin-top:12px">Auction Log</h3>
+  <div id="auctionLog" class="players-list" style="height:160px;overflow:auto"></div>
+</section>
+
+<script>
+// === Storage helpers ===
+const STORAGE_KEYS = {PLAYERS:'vpl_players', TEAMS:'vpl_teams', PLAYERS_TEAMWISE:'vpl_players_teamwise', RAPTOR:'vpl_raptor_enabled'};
+function read(key){ try{ return JSON.parse(localStorage.getItem(key)) || null }catch(e){return null} }
+function write(key,val){ localStorage.setItem(key, JSON.stringify(val)); }
+
+// === Data init ===
+let players = read(STORAGE_KEYS.PLAYERS) || [];
+let teams = read(STORAGE_KEYS.TEAMS) || {}; // {teamName: {points:10000000}}
+let playersTeamWise = read(STORAGE_KEYS.PLAYERS_TEAMWISE) || {}; // {teamName: [playerObj,...]}
+const DEFAULT_POINTS = 10000000;
+
+// Raptor flag: when enabled, auction is available to all clients without admin password
+let raptorEnabled = !!read(STORAGE_KEYS.RAPTOR);
+
+// === UI Shortcuts ===
+const sections = { form:document.getElementById('formSection'), admin:document.getElementById('adminSection'), auction:document.getElementById('auctionSection') };
+const navForm = document.getElementById('navForm'), navAdmin = document.getElementById('navAdmin'), navAuction = document.getElementById('navAuction');
+
+// showSection with admin gating for auction
+function showSection(name){
+  Object.values(sections).forEach(s=>s.classList.remove('active'));
+  if(name === 'auction'){
+    // If Raptor preview is enabled, allow auction access for all clients
+    if(raptorEnabled){
+      sections.auction.classList.add('active');
+    } else {
+      // check admin flag in sessionStorage to avoid prompting repeatedly
+      if(sessionStorage.getItem('vpl_isAdmin') === '1'){
+        sections.auction.classList.add('active');
+      } else {
+        const pass = prompt('Enter Admin Password:');
+        if(pass === 'tejas@12'){
+          sessionStorage.setItem('vpl_isAdmin','1');
+          sections.auction.classList.add('active');
+        } else {
+          alert('Access denied — wrong password.');
+          // fall back to admin section
+          sections.admin.classList.add('active');
+        }
+      }
+    }
+  } else if(name === 'admin'){
+    sections.admin.classList.add('active');
+  } else {
+    sections.form.classList.add('active');
+  }
+  refreshAllUI();
+}
+
+navForm.addEventListener('click',()=>showSection('form'));
+navAdmin.addEventListener('click',()=>showSection('admin'));
+navAuction.addEventListener('click',()=>showSection('auction'));
+
+// === Player form logic ===
+const savePlayerBtn = document.getElementById('savePlayerBtn');
+savePlayerBtn.addEventListener('click',()=>{
+  const name = document.getElementById('pname').value.trim();
+  const age = Number(document.getElementById('page').value);
+  const role = document.getElementById('prole').value;
+  const photoInput = document.getElementById('pphoto');
+  let photoData = '';
+  if(photoInput.files && photoInput.files[0]){
+    const reader = new FileReader();
+    reader.onload = function(e){ photoData = e.target.result; saveNow(); };
+    reader.readAsDataURL(photoInput.files[0]);
+  } else { alert('Please select a photo'); return; }
+
+  function saveNow(){
+    const mobile = document.getElementById('pmobile').value.trim();
+    if(!name || !age || !role || !mobile){ alert('Please fill all player fields'); return; }
+    players.push({id:Date.now(), name, age, role, mobile, photo:photoData, sold:false});
+    write(STORAGE_KEYS.PLAYERS, players);
+    document.getElementById('pname').value=''; document.getElementById('page').value=''; document.getElementById('pmobile').value=''; photoInput.value='';
+    alert('Player registered'); refreshAllUI();
+  }
+  // saveNow will handle actual insertion after image read completes
+});
+
+// === Admin: teams management ===
+const addTeamBtn = document.getElementById('addTeamBtn');
+addTeamBtn.addEventListener('click',()=>{
+  const tName = document.getElementById('newTeam').value.trim();
+  if(!tName){ alert('Enter team name'); return; }
+  if(teams[tName]){ alert('Team already exists'); return; }
+  teams[tName] = {points: DEFAULT_POINTS};
+  playersTeamWise[tName] = [];
+  write(STORAGE_KEYS.TEAMS, teams); write(STORAGE_KEYS.PLAYERS_TEAMWISE, playersTeamWise);
+  document.getElementById('newTeam').value='';
+  refreshAllUI();
+});
+
+function removeTeam(tName){ if(!confirm('Remove team '+tName+' ?')) return; delete teams[tName]; delete playersTeamWise[tName]; write(STORAGE_KEYS.TEAMS, teams); write(STORAGE_KEYS.PLAYERS_TEAMWISE, playersTeamWise); refreshAllUI(); }
+
+// === Auction: buy player for a team ===
+const auctionBuyBtn = document.getElementById('auctionBuyBtn');
+auctionBuyBtn.addEventListener('click',()=>{
+  const playerId = Number(document.getElementById('auctionPlayerSelect').value);
+  const teamName = document.getElementById('auctionTeamSelect').value;
+  const price = Number(document.getElementById('auctionPrice').value);
+  if(!playerId || !teamName || !price){ alert('Choose player, team and enter price'); return; }
+  if(!teams[teamName]){ alert('Team not found'); return; }
+  if(teams[teamName].points < price){ alert('Team does not have enough points'); return; }
+  // find player
+  const pIndex = players.findIndex(p=>p.id===playerId);
+  if(pIndex === -1){ alert('Player not found'); return; }
+  const player = players[pIndex];
+  if(player.sold){ alert('Player already sold'); return; }
+
+  // Deduct
+  teams[teamName].points -= price;
+  playersTeamWise[teamName].push(Object.assign({}, player, {price}));
+  player.sold = true;
+  write(STORAGE_KEYS.TEAMS, teams); write(STORAGE_KEYS.PLAYERS_TEAMWISE, playersTeamWise); write(STORAGE_KEYS.PLAYERS, players);
+
+  appendLog(`${player.name} sold to ${teamName} for ₹${price}`);
+  refreshAllUI();
+});
+
+// === UI refresh functions ===
+function refreshAllUI(){
+  // Players list in admin
+  const plDiv = document.getElementById('playersList');
+  if(players.length===0) plDiv.innerHTML='No players yet'; else plDiv.innerHTML = players.map(p=>`${p.name} (${p.role}) - ₹${p.base} ${p.sold?'<b style="color:green">[SOLD]</b>':''}`).join('<br>');
+
+  // Teams list in admin
+  const teamsList = document.getElementById('teamsList');
+  const teamNames = Object.keys(teams);
+  if(teamNames.length===0) teamsList.innerHTML='No teams yet'; else{
+    teamsList.innerHTML = teamNames.map(t=>{
+      const pts = teams[t].points;
+      const cls = pts<50000? 'alert-critical': (pts<200000? 'alert-low':'');
+      const playersHtml = (playersTeamWise[t]||[]).map(p=>`${p.name} - ₹${p.price}`).join('<br>')||'<i>No players</i>';
+      return `<div class='team-box ${cls}'><div class='team-header'><strong>${t}</strong><span>Points: ${pts}</span></div><div style="margin-top:6px">${playersHtml}</div><div style="margin-top:8px"><button onclick="removeTeam('${escapeHtml(t)}')" style="background:#d32f2f">Remove Team</button></div></div>`;
+    }).join('');
+  }
+
+  // Auction selects
+  const playerSelect = document.getElementById('auctionPlayerSelect');
+  playerSelect.innerHTML = '<option value="">-- Select player --</option>' + players.filter(p=>!p.sold).map(p=>`<option value='${p.id}'>${p.name} (${p.role}) - ₹${p.base}</option>`).join('');
+  const teamSelect = document.getElementById('auctionTeamSelect');
+  teamSelect.innerHTML = '<option value="">-- Select team --</option>' + teamNames.map(t=>`<option value='${t}'>${t} (₹${teams[t].points})</option>`).join('');
+
+  // Auction teams container (visual)
+  const auctionTeamsContainer = document.getElementById('auctionTeamsContainer');
+  auctionTeamsContainer.innerHTML = teamNames.length===0? '<div class="muted">No teams</div>' : teamNames.map((t,i)=>{
+    const pts = teams[t].points;
+    const cls = pts<50000? 'alert-critical': (pts<200000? 'alert-low':'');
+    const playersHtml = (playersTeamWise[t]||[]).map(p=>`${p.name} - ₹${p.price}`).join('<br>')||'<i>No players</i>';
+    return `<div class='team-box ${cls}'><div class='team-header'><strong>${t}</strong><span>Points: ${pts}</span></div><div style="margin-top:8px">${playersHtml}</div></div>`;
+  }).join('');
+
+  // update Raptor toggle checkbox (if present)
+  const enableRaptorCheckbox = document.getElementById('enableRaptor');
+  if(enableRaptorCheckbox) enableRaptorCheckbox.checked = !!raptorEnabled;
+
+  // show a subtle banner in the auction panel when Raptor is enabled
+  const auctionSection = document.getElementById('auctionSection');
+  const existingBanner = document.getElementById('raptorBanner');
+  if(raptorEnabled){
+    if(!existingBanner){
+      const b = document.createElement('div');
+      b.id = 'raptorBanner';
+      b.style = 'background:#eaf6ff;padding:8px;border-radius:6px;margin-bottom:10px;color:#003b6f';
+      b.innerText = 'Raptor mini (Preview) is ENABLED — Auction is available to all clients.';
+      // insert banner just under the auction heading
+      auctionSection.insertBefore(b, auctionSection.firstChild.nextSibling);
+    }
+  } else {
+    if(existingBanner) existingBanner.remove();
+  }
+}
+
+function appendLog(text){ const log = document.getElementById('auctionLog'); const time = new Date().toLocaleTimeString(); log.innerHTML = `<div>[${time}] ${escapeHtml(text)}</div>` + log.innerHTML; }
+
+// utility to escape quotes in removeTeam onclick and HTML
+function escapeHtml(str){ return String(str).replace(/'/g, "\\'").replace(/\"/g,'\\\"'); }
+
+// initial render
+refreshAllUI();
+
+// wire up the enableRaptor checkbox now (script is at bottom so element exists)
+const enableRaptorEl = document.getElementById('enableRaptor');
+if(enableRaptorEl){
+  enableRaptorEl.checked = !!raptorEnabled;
+  enableRaptorEl.addEventListener('change', ()=>{
+    raptorEnabled = enableRaptorEl.checked;
+    write(STORAGE_KEYS.RAPTOR, raptorEnabled);
+    refreshAllUI();
+  });
+}
+
+// expose removeTeam globally (used in onclick HTML created dynamically)
+window.removeTeam = function(name){ // careful: name will be escaped string, unescape not necessary here
+  if(!confirm('Delete team "' + name + '" ?')) return; delete teams[name]; delete playersTeamWise[name]; write(STORAGE_KEYS.TEAMS, teams); write(STORAGE_KEYS.PLAYERS_TEAMWISE, playersTeamWise); refreshAllUI();
+}
+
+// expose showSection for the nav if needed
+window.showSection = showSection;
+
+</script>
+</body>
+</html>
