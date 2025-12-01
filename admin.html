@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VPL Teams Panel</title>
+<style>
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    background: #131313;
+    color: #fff;
+    padding: 20px;
+  }
+  h2 { text-align: center; margin-bottom: 20px; }
+  input { width: 100%; padding: 10px; margin: 8px 0; border-radius: 6px; border: 1px solid #1696ff; background: #222; color: #fff; }
+  button { padding: 10px; background: #468eec; color: #fff; border: none; border-radius: 6px; cursor: pointer; margin-top: 8px; width: 100%; }
+  button:hover { background: #2f6fd1; }
+  .team-box { background: #1e1e1e; padding: 12px; border-radius: 8px; margin-bottom: 12px; }
+  .team-header { display: flex; justify-content: space-between; margin-bottom: 6px; }
+  .players-list { background:#222; padding:8px; border-radius:6px; margin-top:6px; }
+  .alert-critical { border-left: 4px solid red; }
+  .alert-low { border-left: 4px solid orange; }
+  .muted { font-size: 13px; color: #aaa; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<h2>VPL Teams Management (Admin Only)</h2>
+
+<input type="text" id="newTeam" placeholder="Enter new team name">
+<button id="addTeamBtn">Add Team</button>
+
+<h3 style="margin-top:20px;">Existing Teams</h3>
+<div id="teamsList"></div>
+
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js"></script>
+
+<script>
+  // Firebase Config
+  const firebaseConfig = {
+    apiKey: "AIzaSyCz-cOQvNZhliKA5FK-x30vFcKtYFNKypk",
+    authDomain: "vpl4-99d88.firebaseapp.com",
+    databaseURL: "https://vpl4-99d88-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "vpl4-99d88",
+    storageBucket: "vpl4-99d88.appspot.com",
+    messagingSenderId: "856411237278",
+    appId: "1:856411237278:web:26f9d168fc6b20eafcc48f",
+    measurementId: "G-PMDQK8R9WC"
+  };
+
+  const app = firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+  const DEFAULT_POINTS = 1000000;
+
+  // Admin password check
+  const pass = prompt("Enter Admin Password:");
+  if(pass !== "tejas@12") {
+    alert("Wrong password! Access denied.");
+    document.body.innerHTML = "<h2 style='text-align:center;color:red'>Access Denied</h2>";
+    throw new Error("Admin denied");
+  }
+
+  const teamsListDiv = document.getElementById("teamsList");
+
+  // Add new team
+  document.getElementById("addTeamBtn").addEventListener("click", ()=>{
+    const tName = document.getElementById("newTeam").value.trim();
+    if(!tName){ alert("Enter team name"); return; }
+    db.ref("teams/"+tName).set({points: DEFAULT_POINTS});
+    db.ref("playersTeamWise/"+tName).set({});
+    document.getElementById("newTeam").value='';
+  });
+
+  // Remove team
+  function removeTeam(tName){
+    if(!confirm("Remove team "+tName+" ?")) return;
+    db.ref("teams/"+tName).remove();
+    db.ref("playersTeamWise/"+tName).remove();
+  }
+
+  // Render teams
+  function renderTeams(teams){
+    teamsListDiv.innerHTML = '';
+    for(const t in teams){
+      const pts = teams[t].points;
+      const cls = pts<50000? 'alert-critical': (pts<200000? 'alert-low':'');
+      const div = document.createElement("div");
+      div.className = "team-box "+cls;
+      div.innerHTML = `<div class='team-header'><strong>${t}</strong><span>Points: ${pts}</span></div>
+                       <button onclick="removeTeam('${t}')">Remove Team</button>`;
+      teamsListDiv.appendChild(div);
+    }
+  }
+
+  // Listen for changes
+  db.ref("teams").on("value", snapshot=>{
+    renderTeams(snapshot.val() || {});
+  });
+
+  // Expose removeTeam globally for onclick
+  window.removeTeam = removeTeam;
+
+</script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VPL Auction Panel</title>
+<style>
+body { font-family: Arial, Helvetica, sans-serif; background:#131313; color:#fff; padding:20px; }
+h2 { text-align:center; margin-bottom:20px; }
+select,input,button { width:100%; padding:10px; margin:8px 0; border-radius:6px; }
+select,input { border:1px solid #1696ff; background:#222; color:#fff; }
+button { border:none; background:#468eec; color:#fff; cursor:pointer; }
+button:hover{background:#2f6fd1;}
+.team-box{background:#1e1e1e;padding:12px;border-radius:8px;margin-bottom:12px;}
+.team-header{display:flex;justify-content:space-between;margin-bottom:6px;}
+.players-list{background:#222;padding:8px;border-radius:6px;margin-top:6px; height:160px; overflow:auto;}
+</style>
+</head>
+<body>
+
+<h2>VPL Auction Panel</h2>
+
+<label>Select Player</label>
+<select id="auctionPlayerSelect"><option value="">-- Select player --</option></select>
+<label>Select Team</label>
+<select id="auctionTeamSelect"><option value="">-- Select team --</option></select>
+<label>Bid Price</label>
+<input type="number" id="auctionPrice" placeholder="Enter price">
+<button id="auctionBuyBtn">Buy Player (Deduct points)</button>
+
+<h3>Teams & Balances</h3>
+<div id="auctionTeamsContainer"></div>
+
+<h3>Auction Log</h3>
+<div id="auctionLog" class="players-list"></div>
+
+<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js"></script>
+
+<script>
+const firebaseConfig = {
+apiKey:"AIzaSyCz-cOQvNZhliKA5FK-x30vFcKtYFNKypk",
+authDomain:"vpl4-99d88.firebaseapp.com",
+databaseURL:"https://vpl4-99d88-default-rtdb.asia-southeast1.firebasedatabase.app",
+projectId:"vpl4-99d88",
+storageBucket:"vpl4-99d88.appspot.com",
+messagingSenderId:"856411237278",
+appId:"1:856411237278:web:26f9d168fc6b20eafcc48f",
+measurementId:"G-PMDQK8R9WC"
+};
+const app=firebase.initializeApp(firebaseConfig);
+const db=firebase.database();
+const DEFAULT_POINTS=1000000;
+
+// Admin password
+if(prompt("Enter Admin Password:")!=="tejas@12"){
+  alert("Access Denied"); document.body.innerHTML="<h2 style='color:red;text-align:center'>Access Denied</h2>"; throw new Error("Denied");
+}
+
+let teams={};
+
+db.ref("players").on("value",snap=>{
+  const sel=document.getElementById("auctionPlayerSelect");
+  sel.innerHTML='<option value="">-- Select player --</option>';
+  snap.forEach(c=>{
+    const p=c.val(); if(!p.sold) sel.innerHTML+=`<option value='${c.key}'>${p.name} (${p.role})</option>`;
+  });
+});
+
+db.ref("teams").on("value",snap=>{teams=snap.val()||{}; updateTeamsUI();});
+db.ref("playersTeamWise").on("value",snap=>{updateTeamsUI();});
+
+document.getElementById("auctionBuyBtn").addEventListener("click",()=>{
+  const playerId=document.getElementById("auctionPlayerSelect").value;
+  const teamName=document.getElementById("auctionTeamSelect").value;
+  const price=Number(document.getElementById("auctionPrice").value);
+  if(!playerId||!teamName||!price){alert("Select player, team and price"); return;}
+  const team=teams[teamName]||{points:DEFAULT_POINTS};
+  if(team.points<price){alert("Not enough points!"); return;}
+  db.ref(`teams/${teamName}/points`).set(team.points-price);
+  db.ref(`players/${playerId}/sold`).set(true);
+  db.ref(`playersTeamWise/${teamName}`).push({playerId,price});
+  appendLog(`Player bought! ID: ${playerId}, Team: ${teamName}, Price: ₹${price}`);
+});
+
+function updateTeamsUI(){
+  const cont=document.getElementById("auctionTeamsContainer");
+  cont.innerHTML="";
+  const sel=document.getElementById("auctionTeamSelect");
+  sel.innerHTML='<option value="">-- Select team --</option>';
+  for(const t in teams){
+    sel.innerHTML+=`<option value='${t}'>${t} (₹${teams[t].points})</option>`;
+    cont.innerHTML+=`<div class='team-box'><div class='team-header'><strong>${t}</strong><span>Points: ${teams[t].points}</span></div></div>`;
+  }
+}
+
+function appendLog(msg){
+  const log=document.getElementById("auctionLog");
+  const time=new Date().toLocaleTimeString();
+  log.innerHTML=`<div>[${time}] ${msg}</div>`+log.innerHTML;
+}
+</script>
+
+</body>
+</html>
